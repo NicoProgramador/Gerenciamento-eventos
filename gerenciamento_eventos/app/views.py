@@ -7,6 +7,9 @@ from rest_framework import status, viewsets
 from django_filters.rest_framework import DjangoFilterBackend
 from .filters import EventoFilter
 from rest_framework.generics import ListAPIView
+from rest_framework.filters import OrderingFilter
+from datetime import datetime, timedelta
+from django.http import JsonResponse
 
 @api_view(['GET'])
 def read_eventos(request):
@@ -68,25 +71,60 @@ def delete_evento(request, pk):
     evento.delete()
     return Response({"Mensagem: ": "Evento deletado com sucesso!"}, status=status.HTTP_204_NO_CONTENT)
 
+@api_view(['GET'])
+def get_eventos_proximos(request):
+    min_date_str = request.GET.get('min_date', None)
+    max_date_str = request.GET.get('max_date', None)
+
+    try:
+        min_date = datetime.strptime(min_date_str, "%d/%m/%Y") if min_date_str else None
+        max_date = datetime.strptime(max_date_str, "%d/%m/%Y") if max_date_str else None
+
+        if max_date:
+            max_date = max_date + timedelta(days=1) - timedelta(seconds=1)
+
+        queryset = Evento.objects.all()
+
+        if min_date and max_date:
+            queryset = queryset.filter(dataHora__gte=min_date, dataHora__lte=max_date)
+        elif min_date:
+            queryset = queryset.filter(dataHora__gte=min_date)
+        elif max_date:
+            queryset = queryset.filter(dataHora__lte=max_date)
+
+        serializer = EventoSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    except ValueError:
+        return JsonResponse({'Erro': 'Formato de data inválido! Use DD/MM/YYYY'}, status=400)
+
 class EventoListView(ListAPIView):
     serializer_class = EventoSerializer
-    filter_backends = [DjangoFilterBackend]
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_class = EventoFilter
+    ordering_fields = ['dataHora']
+    ordering = ['dataHora']
 
     def get_queryset(self):
-        evento = self.request.GET.get('evento', None)  # Pegando o filtro da URL
+        categoria = self.request.GET.get('evento', None)  # Pegando o filtro da URL
+        quantidade = self.request.GET.get('quantidade', None)
+        ordering = self.request.GET.get('ordering', None)
+        
         queryset = Evento.objects.all()
 
-        if evento:
-            queryset = queryset.filter(categoriaEvento=evento)  # Filtrando dinamicamente
-        
-        return queryset
-    
-    def get_queryset2(self):
-        evento = self.request.GET.get('evento', None)  # Pegando o filtro da URL
-        queryset = Evento.objects.all()
+        if categoria:
+            queryset = queryset.filter(categoriaEvento=categoria)
 
-        if evento:
-            queryset = queryset.filter(dataHora=evento)  # Filtrando dinamicamente
-        
+        if ordering:
+            queryset = queryset.order_by(ordering)
+        else:
+            queryset = queryset.order_by('dataHora')
+
+        if quantidade:
+            try:
+                quantidade = int(quantidade)
+                queryset = queryset[:quantidade]
+            except ValueError:
+                pass
+
         return queryset
